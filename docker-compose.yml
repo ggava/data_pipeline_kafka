@@ -1,7 +1,7 @@
 services:
 
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:3.8.0
     container_name: kafka
     ports:
       - "9092:9092"
@@ -9,14 +9,34 @@ services:
       - KAFKA_NODE_ID=0
       - KAFKA_PROCESS_ROLES=controller,broker
       - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
-      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
-      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_LISTENERS=HOST://:9092,DOCKER://:19092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=HOST://localhost:9092,DOCKER://kafka:19092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,HOST:PLAINTEXT,DOCKER:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=DOCKER
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
     volumes:
-      - kafka_data:/apache/kafka
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 10s
+      retries: 15
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: >
+      /opt/kafka/bin/kafka-topics.sh --create --if-not-exists
+      --topic pedidos --bootstrap-server kafka:19092
+    restart: "no"
 
   postgres:
     image: postgres:16
@@ -30,6 +50,37 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  spark-master:
+    image: apache/spark:3.5.1-python3
+    container_name: spark-master
+    user: root
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "8080:8080"   # painel do cluster
+      - "7077:7077"
+      - "4040:4040"   # painel do job em execução
+    environment:
+      - KAFKA_BOOTSTRAP=kafka:19092
+    volumes:
+      - ./spark:/opt/spark-apps
+      - ivy_cache:/opt/ivy
+
+  spark-worker:
+    image: apache/spark:3.5.1-python3
+    container_name: spark-worker
+    user: root
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - KAFKA_BOOTSTRAP=kafka:19092
+    volumes:
+      - ./spark:/opt/spark-apps
+      - ivy_cache:/opt/ivy
+
 volumes:
   kafka_data:
   postgres_data:
+  ivy_cache:
