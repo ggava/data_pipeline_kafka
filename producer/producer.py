@@ -37,26 +37,47 @@ produtos = [
 
 
 def gerar_pedido():
+
     produto = random.choice(produtos)
-    quantidade = random.randint(1, 3)
+
+    quantidade = random.randint(1, 12)
+
+    # Simula pedidos com quantidade inválida
+    if random.random() < 0.20:
+        quantidade = 0
+
+    valor_total = produto["preco"] * quantidade
 
     pedido = {
         "pedido_id": random.randint(1, 1000000),
         "produto_id": produto["produto_id"],
         "produto": produto["produto"],
         "quantidade": quantidade,
-        "valor_total": produto["preco"] * quantidade,
-        "timestamp": datetime.now().isoformat(),
+        "valor_total": valor_total,
+        "timestamp": datetime.now().isoformat()
     }
 
     return pedido
 
 
-while True:
-    pedido = gerar_pedido()
+try:
 
-    producer.send("pedidos", pedido)
+    while True:
 
-    print(f"Pedido enviado: {pedido}")
+        pedido = gerar_pedido()
 
-    time.sleep(2)
+        producer.send("pedidos", pedido)
+
+        producer.flush()
+
+        print(f"Pedido enviado: {pedido}")
+
+        time.sleep(2)
+
+except KeyboardInterrupt:
+
+    print("\nProducer finalizado pelo usuário.")
+
+finally:
+
+    producer.close()
